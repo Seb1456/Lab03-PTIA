@@ -1,12 +1,15 @@
-# Laboratorio 3 – Búsqueda adversaria: MiniMax con poda α-β
+# Laboratorio 3 – Búsqueda adversaria: Conecta 4
 
 **Curso:** Principios y Tecnologías de IA 2026-2 – Escuela Colombiana de Ingeniería
 **Autor:** Sebastián Granados
 
-Este documento explica **cómo se desarrolló** el laboratorio `AdvSearch_PTIA_2026_2.ipynb`:
-las decisiones de diseño, qué hace cada método, los algoritmos que se usaron y los
-resultados. Para cada método se muestra el código Python del notebook y su
-**equivalente en Java** (carpeta [`java/`](../java)), para que quede claro lo que significa.
+> **Estado del documento: parcial.**
+> ✅ Parte I (lógica del juego Conecta 4): implementada y explicada.
+> ⏳ Parte II (MiniMax con poda α-β), pruebas de partidas y retrospectiva: pendientes.
+
+Este documento explica cómo se desarrolló el notebook `AdvSearch_PTIA_2026_2.ipynb`. Para
+cada método se muestra el código Python y su **equivalente en Java** (carpeta
+[`java/`](../java)), con la explicación de lo que hace y del algoritmo que usa.
 
 ---
 
@@ -14,414 +17,342 @@ resultados. Para cada método se muestra el código Python del notebook y su
 
 ```
 Lab03-PTIA/
-├── AdvSearch_PTIA_2026_2.ipynb   ← notebook resuelto (Python, ya ejecutado)
+├── AdvSearch_PTIA_2026_2.ipynb   ← notebook (Parte I resuelta)
 ├── docs/
 │   └── DESARROLLO_LAB03.md       ← este documento
-└── java/                          ← misma solución en Java, como referencia
+└── java/                          ← Parte I en Java, como referencia
     ├── StateGame.java             (interfaz = clase abstracta del notebook)
-    ├── TicTacToe.java             (el juego)
-    ├── AlphaBetaEngine.java       (MiniMax + poda α-β)
-    └── Main.java                  (partidas de prueba)
+    ├── Connect4.java              (el juego)
+    ├── AlphaBetaEngine.java       (Parte II: solo firmas, pendiente)
+    └── Main.java                  (verificación de las 8 reglas)
 ```
 
 Cómo ejecutarlo:
 
-* **Notebook:** abrirlo en Colab (botón "Open in Colab") → *Entorno de ejecución → Ejecutar todas*.
-* **Java:**
-  ```bash
-  cd java
-  javac *.java
-  java Main
-  ```
-  Las dos versiones dan exactamente las mismas jugadas, valores y número de nodos.
+* **Notebook:** abrirlo en Colab → *Entorno de ejecución → Ejecutar todas*.
+* **Java:** `cd java && javac *.java && java Main`
 
 ---
 
-## 2. Paso a paso de lo que se hizo
+## 2. Enunciado: reglas oficiales
+
+Hay que diseñar desde cero la lógica de **Conecta 4** y separar tres cosas: el **estado**
+del juego, las **reglas de transición** y la **interfaz** que necesitan los algoritmos de
+búsqueda adversaria (MiniMax / Alfa-Beta).
+
+| # | Regla | Dónde se cumple | Estado |
+|---|---|---|---|
+| 1 | Tablero de 6 filas × 7 columnas | `ROWS, COLS = 6, 7` | ✅ |
+| 2 | Jugador 1 y Jugador 2; empieza el Jugador 1 | `start()` | ✅ |
+| 3 | Turnos estrictamente alternos | `result()` → `rival(player)` | ✅ |
+| 4 | Acción = columna 0..6 | validación en `result()` | ✅ |
+| 5 | Gravedad; si la columna está llena, la acción es inválida | `heights[c]` en `result()` | ✅ |
+| 6 | 4 fichas consecutivas en horizontal, vertical o diagonal | `_checkWinner()` | ✅ |
+| 7 | Empate cuando se colocan las 42 fichas | `isTerminal()` | ✅ |
+| 8 | Finalización inmediata | `legalActions()` / `result()` | ✅ |
+
+---
+
+## 3. Paso a paso de lo que se hizo
 
 | Paso | Qué se hizo | Por qué |
-|------|-------------|---------|
-| 1 | Se corrigió la celda de *imports* (`from __future__ import annotations` primero) | Python exige que `from __future__` sea la primera instrucción; si no, da `SyntaxError`. |
-| 2 | Se corrigió la clase abstracta `StateGame`: se agregó `self`, `@abstractmethod` y los `:` que faltaban en `heuristicUtility` y `toString` | La plantilla original no compilaba y sus métodos no podían llamarse sobre un objeto. |
-| 3 | Se eligió el juego **Tres en raya** y se implementó `TicTacToe(StateGame)` | Es el juego de dos jugadores, suma cero e información perfecta más sencillo, y su árbol completo (≈550 000 nodos) cabe en memoria: así se puede verificar que la IA juega de forma perfecta. |
-| 4 | Se implementó `AlphaBetaEngine` (`search`, `maxValue`, `minValue`) | Lo pide la Parte II. Se añadieron contadores de nodos y de podas para medir la eficiencia. |
-| 5 | Se jugaron partidas agente vs agente desde **dos estados iniciales** | Lo pide la celda de pruebas. |
-| 6 | Experimentos extra: detección de victoria/bloqueo, MiniMax sin poda vs con poda y agente débil vs fuerte | Para comprobar que la decisión es correcta y que la poda sirve. |
-| 7 | Se respondió la retrospectiva y se escribió esta documentación | Entregable. |
+|---|---|---|
+| 1 | Se corrigió la celda de *imports* (`from __future__ import annotations` primero) | Si no va de primera, Python lanza `SyntaxError`. |
+| 2 | Se corrigió `StateGame`: se agregaron `self`, `@abstractmethod` y los `:` que faltaban | La plantilla original no compilaba. |
+| 3 | Se diseñó la representación del estado de Conecta 4 | Para que cada jugada y la detección de victoria sean rápidas. |
+| 4 | Se implementó `Connect4(StateGame)` con todos los métodos | Lo pide la Parte I. |
+| 5 | Se escribió una celda de pruebas para las 8 reglas | Para demostrar que la implementación es correcta. |
+| 6 | Parte II | ⏳ *Pendiente* |
 
 ---
 
-## 3. Modelo del juego (Parte I)
-
-Un juego se formaliza como un problema de búsqueda con:
-
-| Elemento formal (Russell & Norvig) | Método | En Tres en raya |
-|---|---|---|
-| Estado inicial *S₀* | `start()` | Tablero vacío, empieza `X` (o uno dado) |
-| `TO-MOVE(s)` | `toMove()` | Quién tiene el turno |
-| `ACTIONS(s)` + `RESULT(s,a)` | `actionResults()` | Un estado nuevo por cada casilla vacía |
-| `IS-TERMINAL(s)` | `isTerminal()` | Hay 3 en línea o el tablero está lleno |
-| `UTILITY(s,p)` | `heuristicUtility(p)` | ±(100 + vacías), 0 o heurística |
-
-### 3.1 Representación del estado
+## 4. Diseño del estado
 
 ```
- 0 | 1 | 2
----+---+---
- 3 | 4 | 5
----+---+---
- 6 | 7 | 8
+fila 5 | . . . . . . . |      índice = fila * 7 + columna
+fila 4 | . . . . . . . |      (la fila 0 es la de ABAJO)
+fila 3 | . . . . . . . |
+fila 2 | . . . . . . . |
+fila 1 | . . . . . . . |
+fila 0 | . . . . . . . |
+       +---------------+
+         0 1 2 3 4 5 6
 ```
 
-* `board`: 9 casillas con `'X'`, `'O'` o `' '`. En Python es una `tuple` y en Java un
-  `char[]` que se copia en el constructor (`board.clone()`).
-* `player`: jugador con el turno.
-* `move`: casilla jugada para llegar al estado (sirve para mostrar la jugada elegida).
+| Atributo | Python | Java | Para qué sirve |
+|---|---|---|---|
+| `board` | `tuple` de 42 | `String[42]` | Contenido de cada casilla: `'1'`, `'2'` o `'.'` |
+| `heights` | `tuple` de 7 | `int[7]` | Fichas en cada columna, que es también la fila donde cae la siguiente → **gravedad en O(1)** |
+| `player` | `str` | `String` | Jugador con el turno |
+| `move` | `int` o `None` | `int` (−1 = inicial) | Última columna jugada |
+| `winnerId` | `str` o `None` | `String` o `null` | Ganador; se calcula una sola vez, al crear el estado |
 
-**Decisión clave: el estado es inmutable.** Cada jugada crea un objeto nuevo en lugar de
-modificar el actual. Así el árbol de búsqueda nunca tiene que "deshacer" jugadas y no
-hay errores porque se comparten referencias. En Java se logra con campos `final` y copia defensiva.
+**Decisiones de diseño**
 
-### 3.2 Métodos, uno por uno
+* **Fila 0 abajo:** la gravedad se reduce a "la ficha cae en la fila `heights[c]`". No hay
+  que recorrer la columna buscando un hueco.
+* **Estado inmutable:** cada jugada crea un objeto nuevo. En Java se logra con campos
+  `final` y copias con `clone()`. Así un buscador puede explorar el árbol sin "deshacer"
+  jugadas, y dos ramas nunca comparten un tablero que se modifique.
+* **El ganador se calcula al construir el estado:** `isTerminal()` y `winner()` solo
+  consultan un atributo, en O(1). Un buscador los llama millones de veces, así que esto importa.
 
-#### `start()` – estado inicial
+---
+
+## 5. Métodos implementados (Parte I)
+
+### 5.1 `start(moves)` – estado inicial
 
 ```python
 @classmethod
-def start(cls, board=None, player='X') -> TicTacToe:
-    if isinstance(board, str):
-        board = [c if c in cls.PLAYERS else cls.EMPTY for c in board]
-    return cls(board, player)
+def start(cls, moves=None) -> Connect4:
+    s = cls()
+    for m in (moves or []):
+        s = s.result(int(m))
+    return s
 ```
 ```java
-public static TicTacToe start(String cells, char player) {
-    char[] b = new char[9];
-    for (int i = 0; i < 9; i++) {
-        char c = cells.charAt(i);
-        b[i] = (c == 'X' || c == 'O') ? c : EMPTY;
-    }
-    return new TicTacToe(b, player, -1);
+public static Connect4 start(String moves) {
+    String[] b = new String[ROWS * COLS];
+    Arrays.fill(b, EMPTY);
+    Connect4 s = new Connect4(b, new int[COLS], P1, -1);
+    for (char ch : moves.toCharArray()) s = s.result(ch - '0');
+    return s;
 }
 ```
-**Qué hace:** es un *factory method* (en Java un método `static`). Sin parámetros
-devuelve el tablero vacío. Con una cadena de 9 caracteres, como `"XO       "`, construye
-una partida que ya va empezada, y así se pueden probar distintos estados iniciales.
+**Qué hace:** es un *factory method* (`static` en Java). Crea el tablero vacío con el
+turno del Jugador 1 (regla 2). Si recibe una secuencia de columnas como `"3324"`, la juega
+con `result()`. Así **cualquier estado inicial se construye con jugadas legales** y no se
+puede crear un tablero imposible, por ejemplo con fichas flotando o con turnos repetidos.
 
-#### `actionResults()` – función sucesora
+### 5.2 `result(column)` – regla de transición
 
 ```python
-def actionResults(self) -> list:
+def result(self, column: int) -> Connect4:
+    if self.isTerminal():
+        raise ValueError("El juego ya terminó: no se permiten jugadas adicionales")
+    if not isinstance(column, int) or not 0 <= column < Connect4.COLS:
+        raise ValueError(f"Columna inválida: {column} (debe estar entre 0 y 6)")
+    r = self.heights[column]
+    if r >= Connect4.ROWS:
+        raise ValueError(f"La columna {column} está llena")
+    board = list(self.board)
+    board[r * Connect4.COLS + column] = self.player
+    heights = list(self.heights)
+    heights[column] += 1
+    return Connect4(board, heights, self.rival(self.player), column)
+```
+```java
+public Connect4 result(int column) {
+    if (isTerminal()) throw new IllegalStateException("El juego ya terminó...");
+    if (column < 0 || column >= COLS) throw new IllegalArgumentException("Columna inválida...");
+    int r = heights[column];
+    if (r >= ROWS) throw new IllegalArgumentException("La columna ... está llena");
+    String[] nb = board.clone();
+    nb[r * COLS + column] = player;
+    int[] nh = heights.clone();
+    nh[column]++;
+    return new Connect4(nb, nh, rival(player), column);
+}
+```
+**Qué hace:** es el corazón de las reglas. En orden:
+1. **Regla 8:** si el juego ya terminó, rechaza la jugada.
+2. **Regla 4:** valida que la columna esté entre 0 y 6.
+3. **Regla 5:** si la columna está llena, la jugada es inválida. Si no, la ficha cae en la fila `heights[column]`.
+4. Copia el tablero y las alturas (inmutabilidad) y coloca la ficha.
+5. **Regla 3:** el nuevo estado tiene el turno del rival.
+
+Complejidad: O(42) por la copia del tablero. La gravedad en sí es O(1).
+
+### 5.3 `legalActions()` y `actionResults()` – sucesores
+
+```python
+ORDER = (3, 2, 4, 1, 5, 0, 6)
+
+def legalActions(self) -> list:
     if self.isTerminal():
         return []
-    order = (4, 0, 2, 6, 8, 1, 3, 5, 7)
-    successors = []
-    for i in order:
-        if self.board[i] == TicTacToe.EMPTY:
-            newBoard = list(self.board)
-            newBoard[i] = self.player
-            successors.append(TicTacToe(newBoard, self.rival(self.player), i))
-    return successors
+    return [c for c in Connect4.ORDER if self.heights[c] < Connect4.ROWS]
+
+def actionResults(self) -> list:
+    return [self.result(c) for c in self.legalActions()]
 ```
 ```java
+public List<Integer> legalActions() {
+    List<Integer> acts = new ArrayList<>();
+    if (isTerminal()) return acts;
+    for (int c : ORDER) if (heights[c] < ROWS) acts.add(c);
+    return acts;
+}
 public List<StateGame> actionResults() {
-    List<StateGame> successors = new ArrayList<>();
-    if (isTerminal()) return successors;
-    for (int i : ORDER) {
-        if (board[i] == EMPTY) {
-            char[] nb = board.clone();
-            nb[i] = player;
-            successors.add(new TicTacToe(nb, rival(player), i));
-        }
-    }
-    return successors;
+    List<StateGame> out = new ArrayList<>();
+    for (int c : legalActions()) out.add(result(c));
+    return out;
 }
 ```
-**Qué hace:** por cada casilla vacía copia el tablero, coloca la ficha del jugador en
-turno y crea el estado hijo, donde el turno pasa al rival. Si el estado es terminal
-devuelve una lista vacía.
+**Qué hace:** `legalActions` devuelve las columnas que no están llenas. Si el juego
+terminó, devuelve una lista vacía (regla 8). `actionResults` convierte cada acción en su
+estado resultante: es la **función sucesora** que usa MiniMax para expandir el árbol.
 
-**Ordenamiento de jugadas (*move ordering*):** las casillas se recorren en el orden
-*centro → esquinas → bordes*. En Tres en raya las mejores jugadas suelen ser el centro y
-las esquinas. La poda α-β corta más ramas cuando la mejor jugada se explora primero,
-así que este orden reduce bastante los nodos visitados.
+**Orden de las columnas (*move ordering*):** se generan del centro hacia los bordes
+(3, 2, 4, 1, 5, 0, 6). La columna central participa en más líneas de 4 y suele ser la
+mejor jugada. Explorar primero las mejores jugadas hace que la poda α-β corte más ramas.
 
-#### `winner()` (auxiliar) e `isTerminal()`
+### 5.4 `_checkWinner()` – detección de victoria (regla 6)
 
 ```python
-LINES = ((0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6))
-
-def winner(self):
-    for a, c, d in LINES:
-        if b[a] != EMPTY and b[a] == b[c] == b[d]:
-            return b[a]
+def _checkWinner(self):
+    if self.move is None:
+        return None
+    c = self.move
+    r = self.heights[c] - 1
+    p = self._cell(r, c)
+    for dr, dc in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        count = 1
+        for sign in (1, -1):
+            rr, cc = r + sign * dr, c + sign * dc
+            while 0 <= rr < ROWS and 0 <= cc < COLS and self._cell(rr, cc) == p:
+                count += 1
+                rr, cc = rr + sign * dr, cc + sign * dc
+        if count >= 4:
+            return p
     return None
-
-def isTerminal(self) -> bool:
-    return self.winner() is not None or EMPTY not in self.board
 ```
 ```java
-public char winner() {
-    for (int[] l : LINES)
-        if (board[l[0]] != EMPTY && board[l[0]] == board[l[1]] && board[l[1]] == board[l[2]])
-            return board[l[0]];
-    return EMPTY;            // en Java se usa EMPTY en lugar de None/null
-}
-public boolean isTerminal() { return winner() != EMPTY || countEmpty() == 0; }
-```
-**Qué hace:** `winner` revisa las 8 líneas ganadoras (3 filas, 3 columnas y 2
-diagonales). El estado es terminal si alguien ganó o si ya no quedan casillas vacías (empate).
-
-#### `toMove()` y `rival()`
-
-```java
-public char toMove()          { return player; }
-public char rival(char p)     { return p == 'X' ? 'O' : 'X'; }
-```
-`toMove` dice quién juega en este estado y `rival` devuelve al otro jugador. El motor
-usa `toMove()` en la raíz para saber quién es **MAX**.
-
-#### `heuristicUtility(player)` – función de utilidad / evaluación
-
-```java
-public int heuristicUtility(char p) {
-    char w = winner();
-    int empties = countEmpty();
-    if (w != EMPTY) return (w == p) ? 100 + empties : -(100 + empties);   // (a) terminal
-    if (empties == 0) return 0;                                          //     empate
-    char opp = rival(p);
-    int score = 0;                                                       // (b) heurística
-    for (int[] l : LINES) {
-        int mine = 0, theirs = 0;
-        for (int i : l) { if (board[i] == p) mine++; else if (board[i] == opp) theirs++; }
-        if (theirs == 0)      score += LINE_VALUE[mine];    // {0, 1, 10}
-        else if (mine == 0)   score -= LINE_VALUE[theirs];
+private String checkWinner() {
+    if (move < 0) return null;
+    int c = move, r = heights[c] - 1;
+    String p = cell(r, c);
+    for (int[] d : DIRS) {                       // {0,1} {1,0} {1,1} {1,-1}
+        int count = 1;
+        for (int sign = 1; sign >= -1; sign -= 2) {
+            int rr = r + sign * d[0], cc = c + sign * d[1];
+            while (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS && cell(rr, cc).equals(p)) {
+                count++; rr += sign * d[0]; cc += sign * d[1];
+            }
+        }
+        if (count >= CONNECT) return p;
     }
-    return score;
+    return null;
 }
 ```
+**Algoritmo:** una línea de 4 nueva **solo puede pasar por la última ficha colocada**. Por
+eso no hace falta revisar todo el tablero. Basta con mirar las 4 direcciones (horizontal,
+vertical, diagonal `/` y diagonal `\`) desde esa ficha y contar cuántas fichas iguales hay
+seguidas hacia cada lado. Si la suma (incluyendo la ficha) es ≥ 4, hay ganador.
 
-**(a) Estados terminales → utilidad exacta**
+* Costo: a lo sumo 4 direcciones × 6 vecinos = **O(1)**.
+* Revisar todo el tablero costaría 69 ventanas × 4 casillas en cada estado.
+
+### 5.5 `isTerminal()` – prueba de terminal (reglas 7 y 8)
+
+```python
+def isTerminal(self) -> bool:
+    return self.winnerId is not None or self.piecesPlayed() == 42
+```
+```java
+public boolean isTerminal() { return winnerId != null || piecesPlayed() == ROWS * COLS; }
+```
+El juego termina si hay ganador o si se colocaron las 42 fichas (empate).
+
+### 5.6 `toMove()` y `rival()`
+
+```java
+public String toMove()          { return player; }
+public String rival(String p)   { return P1.equals(p) ? P2 : P1; }
+```
+`toMove` dice quién juega y `rival` devuelve al otro jugador. En Java los `String` se
+comparan con `equals`, no con `==`.
+
+### 5.7 `heuristicUtility(player)` – función de utilidad
+
+**(a) Estados terminales → valor exacto**
 
 | Situación | Valor |
 |---|---|
-| `player` gana | `+100 + casillas vacías` |
-| `player` pierde | `−100 − casillas vacías` |
+| `player` gana | `+100000 + casillas vacías` |
+| `player` pierde | `−100000 − casillas vacías` |
 | Empate | `0` |
 
-El término `+ casillas vacías` hace que el agente **prefiera ganar cuanto antes** (una
-victoria en la jugada 5 vale más que una en la jugada 7) y que, si va a perder, **retrase la
-derrota**. Sin ese término todas las victorias valdrían lo mismo y el agente podría
-"dar vueltas" antes de ganar.
+El término `+ casillas vacías` hace que se prefiera **ganar antes** y **perder después**.
 
-**(b) Estados no terminales → heurística de líneas abiertas.** Solo se usa cuando la
-búsqueda se corta por profundidad (`depth = 0`). Una línea está *abierta* para un jugador
-si el rival no tiene fichas en ella:
+**(b) Estados no terminales → heurística de ventanas.** Se usa cuando el buscador corta
+por profundidad. Conecta 4 tiene unos 4,5·10¹² estados, así que no se puede buscar hasta
+el final.
 
-* 1 ficha propia en línea abierta → **+1**
-* 2 fichas propias en línea abierta (amenaza de ganar) → **+10**
-* lo mismo para el rival, restando.
+* Hay **69 ventanas** de 4 casillas consecutivas: 24 horizontales, 21 verticales, 12 `/` y 12 `\`.
+  Se calculan una sola vez con `_buildWindows`.
+* Por cada ventana se cuentan las fichas propias y las del rival:
 
-`utilidad = Σ(valor de mis líneas abiertas) − Σ(valor de las líneas abiertas del rival)`
+| Contenido de la ventana | Puntos |
+|---|---|
+| solo fichas propias: 1 / 2 / 3 | +1 / +5 / +50 |
+| solo fichas del rival: 1 / 2 / 3 | −1 / −5 / −50 |
+| fichas de ambos | 0 (ya nadie puede ganar con ella) |
 
-Ejemplo: con `X` en el centro y tablero vacío, X tiene 4 líneas abiertas con 1 ficha (fila
-del medio, columna del medio y 2 diagonales), así que `utilidad(X) = 4`. Por eso, incluso
-con profundidad 1, el agente prefiere el centro.
-
-#### `toString()`
-Devuelve el tablero con separadores `---+---+---`. En Java es la sobrescritura de
-`Object.toString()`, que `println` llama automáticamente.
-
----
-
-## 4. Búsqueda adversaria (Parte II)
-
-### 4.1 MiniMax
-
-Hay dos jugadores. **MAX** (quien busca la jugada) quiere maximizar la utilidad y **MIN**
-(el rival) quiere minimizarla. Se supone que **ambos juegan de forma óptima**. El valor
-de un nodo se define recursivamente:
-
-```
-MINIMAX(s) = UTILITY(s, MAX)                         si s es terminal o depth = 0
-           = max  { MINIMAX(hijo) }                  si en s juega MAX
-           = min  { MINIMAX(hijo) }                  si en s juega MIN
-```
-
-Es un **recorrido en profundidad (DFS)** del árbol de juego. El valor de las hojas
-"sube" hacia la raíz: en los niveles de MAX se toma el máximo y en los de MIN el mínimo.
-
-* Tiempo: **O(b^m)** (b = factor de ramificación, m = profundidad).
-* Espacio: **O(b·m)**, porque solo guarda el camino actual (es DFS).
-
-### 4.2 Poda α-β
-
-MiniMax revisa nodos que no pueden cambiar la decisión. La poda α-β lleva dos cotas:
-
-* **α (alfa):** el mejor valor que **MAX** ya tiene asegurado en el camino actual (empieza en −∞).
-* **β (beta):** el mejor valor que **MIN** ya tiene asegurado en el camino actual (empieza en +∞).
-
-Si en algún nodo **α ≥ β**, los hermanos que faltan no pueden cambiar la decisión de la
-raíz y **no se exploran**:
-
-* **Poda β** (en un nodo MAX): `v ≥ β`. MIN, más arriba, ya tiene una opción que vale β o
-  menos, así que nunca va a dejar que se llegue a este nodo.
-* **Poda α** (en un nodo MIN): `v ≤ α`. MAX, más arriba, ya tiene una opción que vale α o
-  más, así que nunca va a elegir este camino.
-
-La poda **no cambia el resultado**: devuelve la misma decisión que MiniMax. Con un orden de
-jugadas perfecto el tiempo baja a **O(b^(m/2))**, lo que permite buscar casi el doble de
-profundo en el mismo tiempo (Knuth & Moore, 1975).
-
-**Ejemplo de poda:**
-
-```
-            MAX
-          /     \
-       MIN       MIN
-      / | \      / \
-     3 12  8    2   ?   ?
-```
-El primer MIN vale 3, así que en la raíz α = 3. En el segundo MIN la primera hoja vale 2,
-entonces ese nodo valdrá ≤ 2 < α = 3. MAX nunca lo va a elegir y las hojas `?` se podan.
-
-### 4.3 Implementación
+* **Bono por el centro:** +3 por cada ficha propia en la columna 3 y −3 por cada una del
+  rival, porque esa columna participa en más ventanas que cualquier otra.
 
 ```java
-public StateGame search(StateGame s, int depth) {
-    player = s.toMove();                       // quien llama es MAX
-    int alpha = Integer.MIN_VALUE, beta = Integer.MAX_VALUE;
-    StateGame best = null; int bestValue = Integer.MIN_VALUE;
-    for (StateGame child : s.actionResults()) {
-        int v = minValue(child, depth - 1, alpha, beta);   // tras mi jugada, juega MIN
-        if (best == null || v > bestValue) { bestValue = v; best = child; }
-        alpha = Math.max(alpha, bestValue);
-    }
-    return best;                               // el estado sucesor elegido
-}
-
-public int maxValue(StateGame s, int depth, int alpha, int beta) {
-    if (s.isTerminal() || depth <= 0) return s.heuristicUtility(player);
-    int v = Integer.MIN_VALUE;
-    for (StateGame child : s.actionResults()) {
-        v = Math.max(v, minValue(child, depth - 1, alpha, beta));
-        if (v >= beta) return v;               // poda β
-        alpha = Math.max(alpha, v);
-    }
-    return v;
-}
-
-public int minValue(StateGame s, int depth, int alpha, int beta) {
-    if (s.isTerminal() || depth <= 0) return s.heuristicUtility(player);
-    int v = Integer.MAX_VALUE;
-    for (StateGame child : s.actionResults()) {
-        v = Math.min(v, maxValue(child, depth - 1, alpha, beta));
-        if (v <= alpha) return v;              // poda α
-        beta = Math.min(beta, v);
-    }
-    return v;
+for (int[] w : WINDOWS) {
+    int mine = 0, theirs = 0;
+    for (int i : w) { if (board[i].equals(p)) mine++; else if (board[i].equals(opp)) theirs++; }
+    if (theirs == 0) score += WINDOW_WEIGHT[mine];        // {0, 1, 5, 50}
+    else if (mine == 0) score -= WINDOW_WEIGHT[theirs];
 }
 ```
 
-Qué hace cada método:
+### 5.8 `toString()`
 
-* **`search(s, depth)`**: es la raíz. Fija a MAX como el jugador en turno, evalúa cada
-  sucesor con `minValue` (después de jugar MAX, le toca a MIN) y devuelve el **estado**
-  sucesor con mayor valor. La plantilla pide devolver un `StateGame`, no un índice de jugada.
-* **`maxValue`**: valor de un nodo donde juega MAX. Toma el máximo de los hijos y hace la poda β.
-* **`minValue`**: valor de un nodo donde juega MIN. Toma el mínimo de los hijos y hace la poda α.
-* **Límite de profundidad (`depth`)**: cada llamada recursiva resta 1. Al llegar a 0 se
-  usa la heurística. Con `depth = 9` se recorre el árbol completo y el resultado es exacto.
-* **El jugador MAX como atributo**: las firmas de la plantilla (`maxValue(s, depth, alpha,
-  beta)`) no reciben el jugador. Por eso `search` lo guarda en `self.player` / `this.player`
-  y las hojas siempre se evalúan desde el punto de vista de MAX. Este es el esquema
-  MiniMax clásico (no NegaMax).
-* En Python ±∞ se representa con `math.inf`. En Java se usa
-  `Integer.MIN_VALUE` / `Integer.MAX_VALUE`.
+Dibuja el tablero de arriba hacia abajo, con `X` = Jugador 1, `O` = Jugador 2 y los índices
+de columna en la última línea. En Java es la sobrescritura de `Object.toString()`.
 
 ---
 
-## 5. Pruebas y resultados
+## 6. Verificación de las reglas
 
-### 5.1 Estado inicial 1 – tablero vacío, inicia X, ambos con profundidad 9
-
-```
-Jugada 1: X -> casilla 4 | valor=0 | nodos=7865 | podas=2854
-Jugada 2: O -> casilla 0 | valor=0 | nodos=2174 | podas=780
-...
- O | O | X
----+---+---
- X | X | O
----+---+---
- O | X | X
-RESULTADO: empate
-```
-El valor 0 desde la primera jugada coincide con el resultado teórico conocido: con juego
-perfecto, Tres en raya termina en **empate**.
-
-### 5.2 Estado inicial 2 – `X` en 0, `O` en 1 (O jugó un borde, que es un error), turno de X
+La celda de pruebas del notebook (y `java/Main.java`) da este resultado:
 
 ```
-Jugada 1: X -> casilla 4 | valor=102 | ...
-Jugada 2: O -> casilla 8 | valor=-102 | ...   (bloquea la diagonal)
-Jugada 3: X -> casilla 6 | valor=102 | ...   (doble amenaza: columna 0-3-6 y diagonal 2-4-6)
-Jugada 4: O -> casilla 2 | valor=-102 | ...
-Jugada 5: X -> casilla 3 | valor=102 | ...
-RESULTADO: gana X
-```
-El agente detecta desde la primera jugada que tiene **victoria forzada**. El valor 102 =
-100 + 2 casillas vacías al final significa que gana en su tercera jugada. Para lograrlo
-arma una **doble amenaza (*fork*)** que O no puede bloquear por completo.
-
-### 5.3 Victoria inmediata y bloqueo
-
-```
-X gana en 1 jugada -> 2        (tablero "XX OO    ")
-O bloquea la amenaza -> 2      (tablero "XX O     ")
+Reglas 1-2: [OK] 42 casillas, turno inicial: 1
+Regla 3:    [OK] tras J1 juega J2 y tras J2 juega J1
+Regla 4:    [OK] columna 7 / columna -1 -> Columna inválida
+Regla 5:    [OK] las fichas se apilan desde abajo; columna llena -> error
+Regla 6:    [OK] horizontal, vertical, diagonal /, diagonal \, y gana J2
+Regla 7:    [OK] 42 fichas, sin ganador, utilidad = 0
+Regla 8:    [OK] jugar después de una victoria -> error
 ```
 
-### 5.4 Eficiencia: MiniMax vs α-β (desde el tablero vacío)
-
-| Profundidad | Nodos MiniMax | Nodos α-β | Ahorro |
-|---:|---:|---:|---:|
-| 1 | 10 | 10 | 0,0 % |
-| 2 | 82 | 26 | 68,3 % |
-| 3 | 586 | 97 | 83,4 % |
-| 4 | 3 610 | 303 | 91,6 % |
-| 5 | 18 730 | 1 115 | 94,0 % |
-| 6 | 73 450 | 1 802 | 97,5 % |
-| 9 (completo) | 549 946 | 7 865 | **98,6 %** |
-
-Con la poda y el orden de jugadas se visita **unas 70 veces menos nodos** y la decisión es la misma.
-
-### 5.5 Agente débil (profundidad 1) vs fuerte (profundidad 9)
-
-Las dos partidas terminan en empate. La heurística de líneas abiertas es tan buena en
-este juego que, mirando una sola jugada, el agente débil ya toma el centro o las esquinas
-y bloquea las amenazas directas.
+Las secuencias de prueba (`"0011223"` horizontal, `"0101010"` vertical, `"01122323363"`
+diagonal `/`, `"65544343303"` diagonal `\`) se construyen con jugadas legales. La partida
+de empate (`"556350650065250346406463302124323422411111"`) llena las 42 casillas sin que
+nadie haga 4 en línea.
 
 ---
 
-## 6. Resumen de algoritmos y estructuras usadas
+## 7. Parte II – MiniMax con poda α-β ⏳ *(pendiente)*
 
-| Concepto | Dónde | Detalle |
-|---|---|---|
-| Recorrido en profundidad (DFS) recursivo | `maxValue` / `minValue` | Recursión mutua entre ambos métodos |
-| MiniMax | `AlphaBetaEngine` | MAX = jugador en la raíz |
-| Poda α-β | `maxValue` (β) / `minValue` (α) | Mismo resultado que MiniMax, menos nodos |
-| Búsqueda con profundidad limitada | parámetro `depth` | Evaluación heurística en el corte |
-| Ordenamiento de jugadas | `actionResults` | Centro → esquinas → bordes |
-| Función de evaluación lineal | `heuristicUtility` | Líneas abiertas con pesos 1 y 10 |
-| Estado inmutable | `TicTacToe` | `tuple` en Python / `final` + `clone()` en Java |
-| Patrón *Template / Strategy* | `StateGame` | El motor funciona con **cualquier** juego que implemente la interfaz |
+> Esta sección se completará cuando se implemente `AlphaBetaEngine`.
 
-Como `AlphaBetaEngine` solo usa los métodos de `StateGame`, para resolver otro juego (por
-ejemplo Nim o Conecta 4) basta con escribir otra clase que implemente esa interfaz. El
-motor no se toca.
+Ideas que guiarán la implementación:
+
+* **MiniMax:** recorrido en profundidad del árbol de juego. En los nodos de MAX se toma
+  el máximo de los hijos y en los de MIN el mínimo, suponiendo que ambos juegan de forma óptima.
+* **Poda α-β:** se llevan dos cotas, α (lo mejor que MAX ya tiene asegurado) y β (lo mejor
+  que MIN ya tiene asegurado). Cuando α ≥ β, se dejan de explorar los hermanos restantes.
+* **Profundidad limitada:** al llegar a la profundidad máxima se usa `heuristicUtility`.
+* Métodos a implementar: `search(s, depth)`, `maxValue(s, depth, α, β)` y `minValue(s, depth, α, β)`.
+
+*Pendiente:* código, explicación detallada, partidas desde dos estados iniciales y
+comparación de nodos visitados (MiniMax sin poda frente a α-β).
 
 ---
 
-## 7. Referencias
+## 8. Retrospectiva ⏳ *(pendiente)*
+
+---
+
+## 9. Referencias
 
 * Russell, S., & Norvig, P. (2021). *Artificial Intelligence: A Modern Approach* (4th ed.), Cap. 5. Pearson.
-* Knuth, D. E., & Moore, R. W. (1975). An analysis of alpha-beta pruning. *Artificial Intelligence, 6*(4), 293–326.
-* von Neumann, J. (1928). Zur Theorie der Gesellschaftsspiele. *Mathematische Annalen, 100*, 295–320.
+* Allis, L. V. (1988). *A Knowledge-based Approach of Connect-Four. The Game is Solved: White Wins* (Tesis de maestría). Vrije Universiteit Amsterdam.
