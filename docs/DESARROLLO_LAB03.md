@@ -1,6 +1,6 @@
 # Laboratorio 3 – Conecta 4 (Búsqueda adversaria)
 
-**Estado:** Parte I hecha ✅ · Parte II (MiniMax α-β) y retrospectiva pendientes ⏳
+**Estado:** Parte I, Parte II (MiniMax α-β) y retrospectiva hechas ✅
 
 ## Parte I – Clase `Connect4`
 
@@ -32,15 +32,17 @@ implementa. A la plantilla solo se le corrigieron dos `:` que faltaban y el orde
 
 Ejemplo: con una sola `X` en la columna 3, la utilidad para `X` es **7**, porque esa ficha está en 7 líneas libres.
 
-## Parte II – MiniMax con poda α-β ⏳ *(pendiente)*
+## Parte II – MiniMax con poda α-β
 
-Métodos a implementar: `search`, `maxValue` y `minValue`. Idea: MAX elige el máximo y MIN
+`search` prueba cada jugada y se queda con la de mayor valor; `maxValue` y `minValue` se llaman entre sí hasta la profundidad dada o un estado terminal, donde se usa `heuristicUtility`. Idea: MAX elige el máximo y MIN
 el mínimo. Con α (lo mejor que MAX ya tiene asegurado) y β (lo mejor que MIN ya tiene asegurado) se dejan de explorar las ramas cuando α ≥ β.
+
+Prueba: `jugar(s)` pone a los dos jugadores a decidir con MiniMax (profundidad 4) desde dos estados iniciales: el tablero vacío (termina en empate) y una partida ya empezada (gana `O`).
 
 ## Archivos
 
 - `AdvSearch_PTIA_2026_2.ipynb`: notebook.
-- `java/`: la misma Parte I en Java (`javac *.java && java Main`).
+- `java/`: la Parte I en Java (`javac *.java && java Main`).
 
 ## Referencias
 
